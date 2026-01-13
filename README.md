@@ -27,14 +27,6 @@ Produces `bin/proxy`.
 | `SIGHUP` | Reload config (only when using a file) |
 | `SIGINT` | Shutdown |
 
-### Environment Variables
-
-Environment variables are used as fallback when the config does not specify a value.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HYPROXY_LISTEN` | Listen address | `:5520` |
-
 ## Handlers
 
 Handlers form a chain. Each handler processes the connection and either passes it to the next handler (`Continue`), handles it (`Handled`), or drops it (`Drop`).
@@ -99,6 +91,10 @@ Logs the SNI of each connection. Useful for debugging.
   ]
 }
 ```
+
+## Advanced
+
+If `listen` is not set in the config, the environment variable `HYPROXY_LISTEN` is used as fallback (default: `:5520`).
 
 ## License
 
