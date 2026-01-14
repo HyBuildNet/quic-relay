@@ -2,14 +2,18 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'QUIC Relay',
-  description: 'SNI-based reverse proxy for QUIC connections',
+  description: 'Reverse proxy for Hytale servers - route multiple Hytale servers through one IP using SNI-based QUIC routing',
 
   base: '/quic-relay/',
   cleanUrls: true,
 
   head: [
     ['link', { rel: 'icon', href: '/quic-relay/favicon.ico' }],
-    ['meta', { name: 'google-site-verification', content: '-T2K0pWwX_CIpTMvP-RrEmr0nCenG4Nhw1YIl5NcjDQ' }]
+    ['meta', { name: 'google-site-verification', content: '-T2K0pWwX_CIpTMvP-RrEmr0nCenG4Nhw1YIl5NcjDQ' }],
+    ['meta', { property: 'og:site_name', content: 'QUIC Relay' }],
+    ['meta', { property: 'og:locale', content: 'en' }],
+    ['meta', { name: 'twitter:card', content: 'summary' }],
+    ['meta', { name: 'robots', content: 'index, follow' }]
   ],
 
   themeConfig: {

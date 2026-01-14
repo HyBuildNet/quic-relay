@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -497,13 +498,14 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 // Also checks dcidAliases for server's SCID -> original DCID mapping.
 func (p *Proxy) findSession(packet []byte, pktType PacketType) (*handler.Context, []byte) {
 	if pktType == PacketShortHeader {
-		// Short Header: try all known DCID lengths
+		// Short Header: try all known DCID lengths (longest first to avoid prefix collisions)
 		p.dcidLengthsMu.RLock()
 		lengths := make([]int, 0, len(p.dcidLengths))
 		for l := range p.dcidLengths {
 			lengths = append(lengths, l)
 		}
 		p.dcidLengthsMu.RUnlock()
+		sort.Sort(sort.Reverse(sort.IntSlice(lengths)))
 
 		for _, dcidLen := range lengths {
 			dcid, err := ExtractDCID(packet, dcidLen)
