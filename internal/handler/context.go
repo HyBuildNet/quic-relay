@@ -118,6 +118,12 @@ type Context struct {
 	OnFirstServerPacket     func(packet []byte)
 	firstServerPacketCalled atomic.Bool
 
+	// DropSession immediately removes the session from the proxy.
+	// Set by proxy after session is stored. Safe to call multiple times (idempotent).
+	// Handlers can call this to immediately terminate a connection.
+	DropSession       func()
+	dropSessionCalled atomic.Bool
+
 	// values is a thread-safe key-value store for passing data between handlers.
 	values map[string]any
 	mu     sync.RWMutex
@@ -128,6 +134,15 @@ type Context struct {
 func (c *Context) NotifyFirstServerPacket(packet []byte) {
 	if c.OnFirstServerPacket != nil && !c.firstServerPacketCalled.Swap(true) {
 		c.OnFirstServerPacket(packet)
+	}
+}
+
+// Drop immediately removes the session from the proxy.
+// Safe to call multiple times (idempotent) and from any goroutine.
+// Does nothing if DropSession callback is not set.
+func (c *Context) Drop() {
+	if c.DropSession != nil && !c.dropSessionCalled.Swap(true) {
+		c.DropSession()
 	}
 }
 

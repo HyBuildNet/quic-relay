@@ -454,6 +454,12 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 
 		// Store session by DCID
 		p.storeSession(dcidKey, newCtx)
+
+		// Set DropSession callback for immediate session termination by handlers
+		newCtx.DropSession = func() {
+			p.chain.Load().OnDisconnect(newCtx)
+			p.deleteSession(dcidKey)
+		}
 	}
 }
 
