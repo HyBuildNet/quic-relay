@@ -21,9 +21,10 @@ func init() {
 
 // TerminatorConfig holds configuration for the terminator handler.
 type TerminatorConfig struct {
-	Listen string `json:"listen"` // ":5521" or "auto" for ephemeral port
-	Cert   string `json:"cert"`   // Path to TLS certificate
-	Key    string `json:"key"`    // Path to TLS private key
+	Listen      string `json:"listen"`       // ":5521" or "auto" for ephemeral port
+	Cert        string `json:"cert"`         // Path to TLS certificate
+	Key         string `json:"key"`          // Path to TLS private key
+	BackendMTLS bool   `json:"backend_mtls"` // Use same cert as client cert for backend mTLS
 }
 
 // backendEntry tracks a backend address with reference counting.
@@ -39,6 +40,7 @@ type TerminatorHandler struct {
 	config       TerminatorConfig
 	listener     *quic.Listener
 	internalAddr string
+	clientCert   *tls.Certificate // Client certificate for backend mTLS
 
 	// SNI → *backendEntry mapping (set by OnConnect, read by internal listener)
 	backends sync.Map
@@ -67,6 +69,12 @@ func NewTerminatorHandler(raw json.RawMessage) (Handler, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
 		return nil, err
+	}
+
+	// Store certificate for backend mTLS if enabled
+	if cfg.BackendMTLS {
+		h.clientCert = &cert
+		log.Printf("[terminator] backend mTLS enabled")
 	}
 
 	tlsConfig := &tls.Config{
@@ -207,6 +215,10 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	}
 	if alpn != "" {
 		backendTLS.NextProtos = []string{alpn}
+	}
+	// Add client certificate for mTLS if configured
+	if h.clientCert != nil {
+		backendTLS.Certificates = []tls.Certificate{*h.clientCert}
 	}
 
 	serverConn, err := quic.DialAddr(dialCtx, backend, backendTLS, &quic.Config{

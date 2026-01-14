@@ -15,7 +15,8 @@
       "config": {
         "listen": ":5522",
         "cert": "server.crt",
-        "key": "server.key"
+        "key": "server.key",
+        "backend_mtls": true
       }
     },
     {"type": "forwarder"}
