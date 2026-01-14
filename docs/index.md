@@ -1,3 +1,7 @@
+---
+layout: doc
+---
+
 # QUIC Relay
 
 QUIC Relay is a reverse proxy for routing QUIC connections based on SNI (Server Name Indication). It was built for Hytale servers but works with any QUIC-based protocol.
