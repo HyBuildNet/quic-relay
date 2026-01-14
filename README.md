@@ -4,7 +4,7 @@
 
 # QUIC Relay
 
-[![CI](https://github.com/HyBuild-net/quic-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuild-net/quic-relay/actions/workflows/ci.yml)
+[![CI](https://github.com/HyBuildNet/quic-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuildNet/quic-relay/actions/workflows/ci.yml)
 
 A reverse proxy for Hytale servers/Raw QUIC SNI parsing. Route players to different Hytale-Servers based on the domain they connect to.
 According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)).
@@ -20,7 +20,7 @@ flowchart LR
 ## Quickstart
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/HyBuild-net/quic-relay/master/dist/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/HyBuildNet/quic-relay/master/dist/install.sh | sudo bash
 sudo systemctl enable --now quic-relay
 ```
 
@@ -29,16 +29,16 @@ Configure via `/etc/quic-relay/config.json`. Reload with `systemctl reload quic-
 ### Docker
 
 ```bash
-docker run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
+docker run -p 5520:5520/udp ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 ```bash
-podman run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
+podman run -p 5520:5520/udp ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 Or mount your config:
 ```bash
-docker run -p 5520:5520/udp -v /path/to/config.json:/data/config.json ghcr.io/hybuild-net/quic-relay:latest
+docker run -p 5520:5520/udp -v /path/to/config.json:/data/config.json ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 ## Handlers

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="HyBuild-net/quic-relay"
+REPO="HyBuildNet/quic-relay"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/quic-relay"
 SYSTEMD_DIR="/etc/systemd/system"

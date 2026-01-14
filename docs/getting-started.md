@@ -5,7 +5,7 @@
 ### Install script (Linux)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/HyBuild-net/quic-relay/master/dist/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/HyBuildNet/quic-relay/master/dist/install.sh | sudo bash
 sudo systemctl enable --now quic-relay
 ```
 
@@ -14,7 +14,7 @@ This installs the binary to `/usr/local/bin/quic-relay` and creates a systemd se
 ### Docker
 
 ```bash
-docker run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
+docker run -p 5520:5520/udp ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 With a custom config:
@@ -22,19 +22,19 @@ With a custom config:
 ```bash
 docker run -p 5520:5520/udp \
   -v /path/to/config.json:/data/config.json \
-  ghcr.io/hybuild-net/quic-relay:latest
+  ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 ### Podman
 
 ```bash
-podman run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
+podman run -p 5520:5520/udp ghcr.io/hybuildnet/quic-relay:latest
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/HyBuild-net/quic-relay.git
+git clone https://github.com/HyBuildNet/quic-relay.git
 cd quic-relay
 make build
 ```

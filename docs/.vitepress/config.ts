@@ -19,7 +19,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Documentation', link: '/getting-started' },
-      { text: 'GitHub', link: 'https://github.com/HyBuild-net/quic-relay' }
+      { text: 'GitHub', link: 'https://github.com/HyBuildNet/quic-relay' }
     ],
 
     sidebar: [
@@ -44,7 +44,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/HyBuild-net/quic-relay' }
+      { icon: 'github', link: 'https://github.com/HyBuildNet/quic-relay' }
     ],
 
     search: {
@@ -52,7 +52,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/HyBuild-net/quic-relay/edit/master/docs/:path',
+      pattern: 'https://github.com/HyBuildNet/quic-relay/edit/master/docs/:path',
       text: 'Edit this page on GitHub'
     }
   }
