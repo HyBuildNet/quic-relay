@@ -11,8 +11,8 @@ import (
 	"golang.org/x/crypto/hkdf"
 	"io"
 
-	"hyproxy/internal/debug"
-	"hyproxy/internal/handler"
+	"quic-relay/internal/debug"
+	"quic-relay/internal/handler"
 )
 
 // QUIC Version 1 constants

@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hyproxy/internal/debug"
-	"hyproxy/internal/handler"
+	"quic-relay/internal/debug"
+	"quic-relay/internal/handler"
 )
 
 // Config represents the proxy configuration.

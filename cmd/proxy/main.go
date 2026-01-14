@@ -8,9 +8,9 @@ import (
 	"strings"
 	"syscall"
 
-	"hyproxy/internal/debug"
-	"hyproxy/internal/handler"
-	"hyproxy/internal/proxy"
+	"quic-relay/internal/debug"
+	"quic-relay/internal/handler"
+	"quic-relay/internal/proxy"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 
 	// Environment variables as fallback (config takes precedence)
 	if cfg.Listen == "" {
-		cfg.Listen = getEnv("HYPROXY_LISTEN", ":5520")
+		cfg.Listen = getEnv("QUIC_RELAY_LISTEN", ":5520")
 	}
 
 	chain, err := handler.BuildChain(cfg.Handlers)

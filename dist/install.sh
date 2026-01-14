@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-REPO="HyBuild-net/HyProxy"
+REPO="HyBuild-net/quic-relay"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/hyproxy"
+CONFIG_DIR="/etc/quic-relay"
 SYSTEMD_DIR="/etc/systemd/system"
-SERVICE_FILE="hyproxy.service"
+SERVICE_FILE="quic-relay.service"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,32 +45,32 @@ detect_arch() {
 }
 
 create_user() {
-    if ! id "hyproxy" &>/dev/null; then
-        log_info "Creating hyproxy user..."
-        useradd --system --no-create-home --shell /usr/sbin/nologin hyproxy
+    if ! id "quic-relay" &>/dev/null; then
+        log_info "Creating quic-relay user..."
+        useradd --system --no-create-home --shell /usr/sbin/nologin quic-relay
     else
-        log_info "User hyproxy already exists"
+        log_info "User quic-relay already exists"
     fi
 }
 
 download_binary() {
     local arch="$1"
-    local binary_name="hyproxy-linux-${arch}"
+    local binary_name="quic-relay-linux-${arch}"
     local url="https://github.com/${REPO}/releases/latest/download/${binary_name}"
 
-    log_info "Downloading hyproxy for ${arch}..."
+    log_info "Downloading quic-relay for ${arch}..."
 
     if command -v curl &> /dev/null; then
-        curl -fsSL -o "${INSTALL_DIR}/hyproxy" "$url"
+        curl -fsSL -o "${INSTALL_DIR}/quic-relay" "$url"
     elif command -v wget &> /dev/null; then
-        wget -qO "${INSTALL_DIR}/hyproxy" "$url"
+        wget -qO "${INSTALL_DIR}/quic-relay" "$url"
     else
         log_error "curl or wget is required"
         exit 1
     fi
 
-    chmod +x "${INSTALL_DIR}/hyproxy"
-    log_info "Binary installed to ${INSTALL_DIR}/hyproxy"
+    chmod +x "${INSTALL_DIR}/quic-relay"
+    log_info "Binary installed to ${INSTALL_DIR}/quic-relay"
 }
 
 install_config() {
@@ -98,7 +98,7 @@ install_config() {
   ]
 }
 EOF
-        chown hyproxy:hyproxy "${CONFIG_DIR}/config.json"
+        chown quic-relay:quic-relay "${CONFIG_DIR}/config.json"
         chmod 640 "${CONFIG_DIR}/config.json"
     fi
 }
@@ -119,21 +119,21 @@ install_service() {
 }
 
 enable_service() {
-    log_info "Enabling hyproxy service..."
-    systemctl enable hyproxy
+    log_info "Enabling quic-relay service..."
+    systemctl enable quic-relay
 }
 
 restart_if_running() {
-    if systemctl is-active --quiet hyproxy; then
-        log_info "Restarting hyproxy service..."
-        systemctl restart hyproxy
+    if systemctl is-active --quiet quic-relay; then
+        log_info "Restarting quic-relay service..."
+        systemctl restart quic-relay
     fi
 }
 
 main() {
     echo ""
-    echo "  HyProxy Installer"
-    echo "  =================="
+    echo "  QUIC Relay Installer"
+    echo "  ====================="
     echo ""
 
     check_root
@@ -155,10 +155,9 @@ main() {
     echo ""
     echo "  Next steps:"
     echo "    1. Edit config:  nano ${CONFIG_DIR}/config.json"
-    echo "    2. Set backend:  HYPROXY_BACKEND=your-server:5520"
-    echo "    3. Start:        systemctl start hyproxy"
-    echo "    4. Check status: systemctl status hyproxy"
-    echo "    5. View logs:    journalctl -u hyproxy -f"
+    echo "    2. Start:        systemctl start quic-relay"
+    echo "    3. Check status: systemctl status quic-relay"
+    echo "    4. View logs:    journalctl -u quic-relay -f"
     echo ""
 }
 

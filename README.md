@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="dist/logo.png" alt="HyProxy" width="200">
+  <img src="dist/logo.png" alt="QUIC Relay" width="200">
 </p>
 
-# HyProxy
+# QUIC Relay
 
-[![CI](https://github.com/HyBuild-net/HyProxy/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuild-net/HyProxy/actions/workflows/ci.yml)
+[![CI](https://github.com/HyBuild-net/quic-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuild-net/quic-relay/actions/workflows/ci.yml)
 
 A reverse proxy for Hytale servers. Route players to different Hytale-Servers based on the domain they connect to.
-According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)). 
+According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)).
 And therefore a QUIC-Proxy might be the only convenient way for achieving standard port + multiple servers.
 
 ```mermaid
 flowchart LR
-    A[Player A] -->|play.example.com| P[HyProxy :5520] --> S1[play.example.com]
+    A[Player A] -->|play.example.com| P[QUIC Relay :5520] --> S1[play.example.com]
     B[Player B] -->|lobby.example.com| P --> S2[127.0.0.1:5521]
     C[Player C] -->|minigames.example.com| P --> S3[minigames.dev:67344]
 ```
@@ -20,25 +20,25 @@ flowchart LR
 ## Quickstart
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/HyBuild-net/HyProxy/master/dist/install.sh | sudo bash
-sudo systemctl enable --now hyproxy
+curl -sSL https://raw.githubusercontent.com/HyBuild-net/quic-relay/master/dist/install.sh | sudo bash
+sudo systemctl enable --now quic-relay
 ```
 
-Configure via `/etc/hyproxy/config.json` or `HYPROXY_BACKEND` env. Reload with `systemctl reload hyproxy`.
+Configure via `/etc/quic-relay/config.json`. Reload with `systemctl reload quic-relay`.
 
 ### Docker
 
 ```bash
-docker run -p 5520:5520/udp -e HYPROXY_BACKEND=your-server:5520 ghcr.io/hybuild-net/hyproxy:latest
+docker run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
 ```
 
 ```bash
-podman run -p 5520:5520/udp -e HYPROXY_BACKEND=your-server:5520 ghcr.io/hybuild-net/hyproxy:latest
+podman run -p 5520:5520/udp ghcr.io/hybuild-net/quic-relay:latest
 ```
 
 Or mount your config:
 ```bash
-docker run -p 5520:5520/udp -v /path/to/config.json:/data/config.json ghcr.io/hybuild-net/hyproxy:latest
+docker run -p 5520:5520/udp -v /path/to/config.json:/data/config.json ghcr.io/hybuild-net/quic-relay:latest
 ```
 
 ## Handlers
@@ -69,7 +69,7 @@ Routes connections to different backends based on SNI. Each route can be a singl
 }
 ```
 [?] Why do we need the `{"type": "forwarder"}` here? The forwarding logic is implemented as a handler itself, this way we can easily replace the forwarding logic with some kind of
-terminating-logic, which can read the Hytale-Protocol itself and is capable to dig deeper into the game logic rather than just proxy traffic through. 
+terminating-logic, which can read the Hytale-Protocol itself and is capable to dig deeper into the game logic rather than just proxy traffic through.
 
 ### simple-router
 
@@ -112,8 +112,7 @@ Logs the SNI of each connection. Useful for debugging.
 ## Advanced
 
 Environment variables as fallback when not set in config:
-- `HYPROXY_LISTEN` - Listen address (default: `:5520`)
-- `HYPROXY_BACKEND` - Backend address for `simple-router`
+- `QUIC_RELAY_LISTEN` - Listen address (default: `:5520`)
 
 ## Build
 
@@ -127,4 +126,4 @@ Produces `bin/proxy`.
 
 MIT License. See [LICENSE](LICENSE) for details.
 
-[!] This project is neither related to nor affiliated with HYPIXEL STUDIOS CANADA INC. or any other Trademark owner of Hytale. 
+[!] This project is neither related to nor affiliated with HYPIXEL STUDIOS CANADA INC. or any other Trademark owner of Hytale.

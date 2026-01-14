@@ -1,8 +1,8 @@
 package proxy
 
 import (
-	"hyproxy/internal/handler"
 	"net"
+	"quic-relay/internal/handler"
 	"sync/atomic"
 	"testing"
 	"time"

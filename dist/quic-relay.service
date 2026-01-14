@@ -1,14 +1,14 @@
 [Unit]
-Description=HyProxy - Hytale QUIC Reverse Proxy
-Documentation=https://github.com/HyBuild-net/HyProxy
+Description=QUIC Relay - Hytale QUIC Reverse Proxy
+Documentation=https://github.com/HyBuild-net/quic-relay
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=hyproxy
-Group=hyproxy
-ExecStart=/usr/local/bin/hyproxy -config /etc/hyproxy/config.json
+User=quic-relay
+Group=quic-relay
+ExecStart=/usr/local/bin/quic-relay -config /etc/quic-relay/config.json
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5

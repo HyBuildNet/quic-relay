@@ -16,7 +16,7 @@ echo:
 	go run ./cmd/echo -listen :4433
 
 client:
-	go run ./cmd/client -target localhost:5520 -sni echo.local -message "Hello HyProxy!"
+	go run ./cmd/client -target localhost:5520 -sni echo.local -message "Hello QUIC Relay!"
 
 # Direct connection (bypass proxy)
 client-direct:

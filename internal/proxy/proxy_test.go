@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	"hyproxy/internal/handler"
+	"quic-relay/internal/handler"
 	"testing"
 	"time"
 )

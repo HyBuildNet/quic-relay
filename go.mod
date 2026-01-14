@@ -1,4 +1,4 @@
-module hyproxy
+module quic-relay
 
 go 1.25.0
 

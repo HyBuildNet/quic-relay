@@ -17,11 +17,11 @@ const protocol = "quic-echo"
 func main() {
 	target := flag.String("target", "localhost:4433", "Target address")
 	sni := flag.String("sni", "echo.local", "SNI hostname")
-	message := flag.String("message", "Hello HyProxy!", "Message to send")
+	message := flag.String("message", "Hello QUIC Relay!", "Message to send")
 	flag.Parse()
 
 	fmt.Println("========================================")
-	fmt.Printf("  HyProxy Client\n")
+	fmt.Printf("  QUIC Relay Client\n")
 	fmt.Printf("  Target: %s\n", *target)
 	fmt.Printf("  SNI:    %s\n", *sni)
 	fmt.Println("========================================")

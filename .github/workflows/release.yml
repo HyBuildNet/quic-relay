@@ -23,16 +23,16 @@ jobs:
 
       - name: Build binaries
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o hyproxy-linux-amd64 ./cmd/proxy
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o hyproxy-linux-arm64 ./cmd/proxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o quic-relay-linux-amd64 ./cmd/proxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o quic-relay-linux-arm64 ./cmd/proxy
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            hyproxy-linux-amd64
-            hyproxy-linux-arm64
+            quic-relay-linux-amd64
+            quic-relay-linux-arm64
 
   build-docker:
     runs-on: ubuntu-latest
