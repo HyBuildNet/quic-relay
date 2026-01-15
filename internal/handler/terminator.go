@@ -1,16 +1,21 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/quic-go/quic-go"
 	"quic-relay/internal/debug"
 )
@@ -25,6 +30,8 @@ type TerminatorConfig struct {
 	Cert        string `json:"cert"`         // Path to TLS certificate
 	Key         string `json:"key"`          // Path to TLS private key
 	BackendMTLS bool   `json:"backend_mtls"` // Use same cert as client cert for backend mTLS
+	LogPackets  int    `json:"log_packets"`  // Number of packets to log per direction (0 = disabled)
+	SkipPackets int    `json:"skip_packets"` // Number of packets to skip before logging
 }
 
 // backendEntry tracks a backend address with reference counting.
@@ -239,7 +246,7 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	}
 
 	// Create session and start bridging
-	session := newTerminatorSession(clientConn, serverConn)
+	session := newTerminatorSession(clientConn, serverConn, h.config.LogPackets, h.config.SkipPackets)
 	sessionID := h.sessionCount.Add(1)
 	h.sessions.Store(sessionID, session)
 	defer h.sessions.Delete(sessionID)
@@ -283,21 +290,201 @@ func (h *TerminatorHandler) Shutdown(ctx context.Context) error {
 
 // terminatorSession represents a bridged connection between client and server.
 type terminatorSession struct {
-	clientConn *quic.Conn
-	serverConn *quic.Conn
-	ctx        context.Context
-	cancel     context.CancelFunc
-	closed     atomic.Bool
-	wg         sync.WaitGroup
+	clientConn    *quic.Conn
+	serverConn    *quic.Conn
+	ctx           context.Context
+	cancel        context.CancelFunc
+	closed        atomic.Bool
+	wg            sync.WaitGroup
+	clientPackets atomic.Int32 // Counter for logged client packets
+	serverPackets atomic.Int32 // Counter for logged server packets
+	logPackets    int          // Max packets to log per direction
+	skipPackets   int          // Packets to skip before logging
 }
 
-func newTerminatorSession(client, server *quic.Conn) *terminatorSession {
+// streamLogger buffers stream data to handle packet fragmentation.
+type streamLogger struct {
+	prefix      string
+	counter     *atomic.Int32
+	buffer      []byte
+	packets     int
+	maxPackets  int
+	skipPackets int
+	skipped     int
+}
+
+func newStreamLogger(prefix string, counter *atomic.Int32, maxPackets, skipPackets int) *streamLogger {
+	return &streamLogger{
+		prefix:      prefix,
+		counter:     counter,
+		maxPackets:  maxPackets,
+		skipPackets: skipPackets,
+	}
+}
+
+// processData adds data to buffer and tries to log complete packets.
+func (l *streamLogger) processData(data []byte) {
+	if l.maxPackets <= 0 || l.packets >= l.maxPackets {
+		return // Logging disabled or limit reached
+	}
+
+	l.buffer = append(l.buffer, data...)
+	l.tryLogPackets()
+}
+
+// tryLogPackets attempts to extract and log complete packets from the buffer.
+func (l *streamLogger) tryLogPackets() {
+	for l.packets < l.maxPackets && len(l.buffer) > 0 {
+		// Determine if we should log this packet or just skip it
+		shouldLog := l.skipped >= l.skipPackets
+
+		consumed := l.tryConsumePacket(shouldLog)
+		if consumed == 0 {
+			break // Need more data
+		}
+		l.buffer = l.buffer[consumed:]
+
+		// Skip packets before logging
+		if l.skipped < l.skipPackets {
+			l.skipped++
+			continue
+		}
+
+		l.packets++
+		l.counter.Add(1)
+	}
+}
+
+// tryConsumePacket finds a complete packet and optionally logs it.
+// Returns bytes consumed, or 0 if incomplete.
+func (l *streamLogger) tryConsumePacket(shouldLog bool) int {
+	if len(l.buffer) < 8 {
+		return 0 // Need at least header
+	}
+
+	// Look for zstd magic anywhere in the buffer
+	idx := bytes.Index(l.buffer, zstdMagic)
+	if idx >= 0 {
+		// Found zstd, try to decode
+		compressed := l.buffer[idx:]
+		frameSize := getZstdFrameSize(compressed)
+		if frameSize == 0 {
+			return 0 // Need more data
+		}
+
+		// Complete frame
+		totalLen := idx + frameSize
+		if shouldLog {
+			logPacketComplete(l.prefix, l.packets+1, l.buffer[:totalLen], idx, frameSize)
+		}
+		return totalLen
+	}
+
+	// No zstd magic found
+
+	// Check if buffer looks like it might be waiting for zstd
+	if len(l.buffer) >= 4096 {
+		if shouldLog {
+			logPacket(l.prefix, l.packets+1, l.buffer[:4096])
+		}
+		return 4096
+	}
+
+	// Try to determine packet boundary
+	pktLen := l.findPacketBoundary()
+	if pktLen > 0 && pktLen <= len(l.buffer) {
+		if shouldLog {
+			logPacket(l.prefix, l.packets+1, l.buffer[:pktLen])
+		}
+		return pktLen
+	}
+
+	// If buffer is reasonably sized, consume it
+	if len(l.buffer) >= 64 && len(l.buffer) < 1024 {
+		if shouldLog {
+			logPacket(l.prefix, l.packets+1, l.buffer)
+		}
+		return len(l.buffer)
+	}
+
+	return 0 // Need more data
+}
+
+// findPacketBoundary tries to find where the current packet ends.
+func (l *streamLogger) findPacketBoundary() int {
+	// Look for patterns that suggest packet boundaries
+	// The protocol seems to have 8-byte headers with small type values
+
+	// Scan for potential next packet header
+	for i := 8; i+8 <= len(l.buffer); i++ {
+		// Check if this looks like a header (small first uint32, reasonable second)
+		val1 := binary.LittleEndian.Uint32(l.buffer[i:])
+		val2 := binary.LittleEndian.Uint32(l.buffer[i+4:])
+
+		// Header heuristics: type < 256, second value < 64KB
+		if val1 < 256 && val2 < 65536 && val2 > 0 {
+			return i
+		}
+	}
+
+	return 0
+}
+
+// getZstdFrameSize returns the total frame size, or 0 if incomplete.
+// Uses binary search to find the minimum valid frame size.
+func getZstdFrameSize(data []byte) int {
+	if len(data) < 5 {
+		return 0 // Need magic + descriptor at minimum
+	}
+
+	// Binary search for minimum valid frame size
+	lo, hi := 5, len(data)
+	result := 0
+
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		if _, err := zstdDecoder.DecodeAll(data[:mid], nil); err == nil {
+			result = mid // This size works
+			hi = mid - 1 // Try smaller
+		} else {
+			lo = mid + 1 // Need more
+		}
+	}
+
+	return result
+}
+
+// logPacketComplete logs a packet with successful zstd decode.
+func logPacketComplete(prefix string, num int, data []byte, zstdIdx, frameSize int) {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s packet #%d (%d bytes)\n", prefix, num, len(data)))
+
+	if zstdIdx > 0 {
+		sb.WriteString(fmt.Sprintf("── Header (%d bytes) ──\n", zstdIdx))
+		sb.WriteString(formatHeader(data[:zstdIdx]))
+	}
+
+	compressed := data[zstdIdx : zstdIdx+frameSize]
+	if decompressed, err := zstdDecoder.DecodeAll(compressed, nil); err == nil {
+		sb.WriteString(fmt.Sprintf("── Payload (zstd: %d → %d bytes) ──\n", len(compressed), len(decompressed)))
+		sb.WriteString(hexDump(decompressed))
+	} else {
+		sb.WriteString(fmt.Sprintf("── Payload (zstd decode failed: %v) ──\n", err))
+		sb.WriteString(hexDump(compressed))
+	}
+
+	log.Print(sb.String())
+}
+
+func newTerminatorSession(client, server *quic.Conn, logPackets, skipPackets int) *terminatorSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &terminatorSession{
-		clientConn: client,
-		serverConn: server,
-		ctx:        ctx,
-		cancel:     cancel,
+		clientConn:  client,
+		serverConn:  server,
+		ctx:         ctx,
+		cancel:      cancel,
+		logPackets:  logPackets,
+		skipPackets: skipPackets,
 	}
 }
 
@@ -319,15 +506,15 @@ func (s *terminatorSession) bridge(parentCtx context.Context) {
 	// 4. Server → Client (unidirectional)
 
 	s.wg.Add(4)
-	go s.bridgeBidirectional(s.clientConn, s.serverConn)  // Client-initiated
-	go s.bridgeBidirectional(s.serverConn, s.clientConn)  // Server-initiated
-	go s.bridgeUnidirectional(s.clientConn, s.serverConn) // Client → Server
-	go s.bridgeUnidirectional(s.serverConn, s.clientConn) // Server → Client
+	go s.bridgeBidirectional(s.clientConn, s.serverConn, true)        // Client-initiated
+	go s.bridgeBidirectional(s.serverConn, s.clientConn, false)       // Server-initiated
+	go s.bridgeUnidirectional(s.clientConn, s.serverConn, "[client]") // Client → Server
+	go s.bridgeUnidirectional(s.serverConn, s.clientConn, "[server]") // Server → Client
 
 	s.wg.Wait()
 }
 
-func (s *terminatorSession) bridgeBidirectional(src, dst *quic.Conn) {
+func (s *terminatorSession) bridgeBidirectional(src, dst *quic.Conn, srcIsClient bool) {
 	defer s.wg.Done()
 
 	debug.Printf(" bridgeBidirectional: waiting for streams from %s", src.RemoteAddr())
@@ -351,11 +538,11 @@ func (s *terminatorSession) bridgeBidirectional(src, dst *quic.Conn) {
 		debug.Printf(" bridgeBidirectional: opened stream %d to %s", dstStream.StreamID(), dst.RemoteAddr())
 
 		s.wg.Add(1)
-		go s.copyBidirectionalStream(srcStream, dstStream)
+		go s.copyBidirectionalStream(srcStream, dstStream, srcIsClient)
 	}
 }
 
-func (s *terminatorSession) bridgeUnidirectional(src, dst *quic.Conn) {
+func (s *terminatorSession) bridgeUnidirectional(src, dst *quic.Conn, prefix string) {
 	defer s.wg.Done()
 
 	for {
@@ -371,22 +558,29 @@ func (s *terminatorSession) bridgeUnidirectional(src, dst *quic.Conn) {
 		}
 
 		s.wg.Add(1)
-		go s.copyUnidirectionalStream(srcStream, dstStream)
+		go s.copyUnidirectionalStream(srcStream, dstStream, prefix)
 	}
 }
 
-func (s *terminatorSession) copyBidirectionalStream(src, dst *quic.Stream) {
+func (s *terminatorSession) copyBidirectionalStream(src, dst *quic.Stream, srcIsClient bool) {
 	defer s.wg.Done()
 	defer src.Close()
 	defer dst.Close()
 
 	debug.Printf(" copyBidirectionalStream: bridging stream %d <-> %d", src.StreamID(), dst.StreamID())
 
+	srcPrefix := "[server]"
+	dstPrefix := "[client]"
+	if srcIsClient {
+		srcPrefix = "[client]"
+		dstPrefix = "[server]"
+	}
+
 	done := make(chan struct{}, 2)
 
 	// src → dst
 	go func() {
-		n, err := io.Copy(dst, src)
+		n, err := s.copyWithLog(dst, src, srcPrefix)
 		debug.Printf(" stream %d -> %d: copied %d bytes, err=%v", src.StreamID(), dst.StreamID(), n, err)
 		dst.Close() // Signal write-end closed (sends FIN)
 		done <- struct{}{}
@@ -394,7 +588,7 @@ func (s *terminatorSession) copyBidirectionalStream(src, dst *quic.Stream) {
 
 	// dst → src
 	go func() {
-		n, err := io.Copy(src, dst)
+		n, err := s.copyWithLog(src, dst, dstPrefix)
 		debug.Printf(" stream %d -> %d: copied %d bytes, err=%v", dst.StreamID(), src.StreamID(), n, err)
 		src.Close()
 		done <- struct{}{}
@@ -409,11 +603,121 @@ func (s *terminatorSession) copyBidirectionalStream(src, dst *quic.Stream) {
 	}
 }
 
-func (s *terminatorSession) copyUnidirectionalStream(src *quic.ReceiveStream, dst *quic.SendStream) {
+func (s *terminatorSession) copyUnidirectionalStream(src *quic.ReceiveStream, dst *quic.SendStream, prefix string) {
 	defer s.wg.Done()
 	defer dst.Close()
 
-	io.Copy(dst, src)
+	s.copyWithLog(dst, src, prefix)
+}
+
+// zstd magic number: 0xFD2FB528
+var zstdMagic = []byte{0x28, 0xB5, 0x2F, 0xFD}
+
+// Shared zstd decoder (thread-safe, reusable)
+var zstdDecoder, _ = zstd.NewReader(nil)
+
+// copyWithLog copies data from src to dst while logging the first 5 packets per direction.
+func (s *terminatorSession) copyWithLog(dst io.Writer, src io.Reader, prefix string) (int64, error) {
+	buf := make([]byte, 32*1024)
+	var total int64
+
+	counter := &s.serverPackets
+	if prefix == "[client]" {
+		counter = &s.clientPackets
+	}
+
+	logger := newStreamLogger(prefix, counter, s.logPackets, s.skipPackets)
+
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			logger.processData(buf[:n])
+			nw, werr := dst.Write(buf[:n])
+			total += int64(nw)
+			if werr != nil {
+				return total, werr
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return total, nil
+			}
+			return total, err
+		}
+	}
+}
+
+// logPacket analyzes and logs a packet, decompressing zstd if found.
+func logPacket(prefix string, num int, data []byte) {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%s packet #%d (%d bytes)\n", prefix, num, len(data)))
+
+	// Find zstd magic in packet
+	if idx := bytes.Index(data, zstdMagic); idx >= 0 && idx < 32 {
+		// Header before zstd
+		if idx > 0 {
+			sb.WriteString(fmt.Sprintf("── Header (%d bytes) ──\n", idx))
+			sb.WriteString(formatHeader(data[:idx]))
+		}
+
+		// Decompress zstd payload
+		compressed := data[idx:]
+		if decompressed, err := zstdDecoder.DecodeAll(compressed, nil); err == nil {
+			sb.WriteString(fmt.Sprintf("── Payload (zstd: %d → %d bytes) ──\n", len(compressed), len(decompressed)))
+			sb.WriteString(hexDump(decompressed))
+		} else {
+			sb.WriteString(fmt.Sprintf("── Payload (zstd decode failed: %v) ──\n", err))
+			sb.WriteString(hexDump(compressed))
+		}
+	} else {
+		// No zstd, dump raw
+		sb.WriteString(hexDump(data))
+	}
+
+	log.Print(sb.String())
+}
+
+// formatHeader formats the packet header as labeled uint32 fields.
+func formatHeader(data []byte) string {
+	var sb strings.Builder
+	for i := 0; i+4 <= len(data); i += 4 {
+		val := binary.LittleEndian.Uint32(data[i:])
+		sb.WriteString(fmt.Sprintf("  [%d] 0x%08x (%d)\n", i/4, val, val))
+	}
+	// Trailing bytes
+	if rem := len(data) % 4; rem > 0 {
+		sb.WriteString(fmt.Sprintf("  ... %x\n", data[len(data)-rem:]))
+	}
+	return sb.String()
+}
+
+// hexDump formats bytes as hex + ASCII.
+func hexDump(data []byte) string {
+	var sb strings.Builder
+	for i := 0; i < len(data); i += 16 {
+		sb.WriteString(fmt.Sprintf("%04x  ", i))
+		for j := 0; j < 16; j++ {
+			if i+j < len(data) {
+				sb.WriteString(fmt.Sprintf("%02x ", data[i+j]))
+			} else {
+				sb.WriteString("   ")
+			}
+			if j == 7 {
+				sb.WriteByte(' ')
+			}
+		}
+		sb.WriteString(" |")
+		for j := 0; j < 16 && i+j < len(data); j++ {
+			b := data[i+j]
+			if b >= 32 && b <= 126 {
+				sb.WriteByte(b)
+			} else {
+				sb.WriteByte('.')
+			}
+		}
+		sb.WriteString("|\n")
+	}
+	return sb.String()
 }
 
 // Close closes the session and both connections.

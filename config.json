@@ -16,7 +16,9 @@
         "listen": ":5522",
         "cert": "server.crt",
         "key": "server.key",
-        "backend_mtls": true
+        "backend_mtls": true,
+        "log_packets": 50,
+        "skip_packets": 5
       }
     },
     {"type": "forwarder"}
