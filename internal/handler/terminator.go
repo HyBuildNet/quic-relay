@@ -30,8 +30,13 @@ type TerminatorConfig struct {
 	Cert        string `json:"cert"`         // Path to TLS certificate
 	Key         string `json:"key"`          // Path to TLS private key
 	BackendMTLS bool   `json:"backend_mtls"` // Use same cert as client cert for backend mTLS
-	LogPackets  int    `json:"log_packets"`  // Number of packets to log per direction (0 = disabled)
-	SkipPackets int    `json:"skip_packets"` // Number of packets to skip before logging
+
+	// Packet logging settings (per direction)
+	LogClientPackets  int `json:"log_client_packets"`  // Number of client packets to log (0 = disabled)
+	LogServerPackets  int `json:"log_server_packets"`  // Number of server packets to log (0 = disabled)
+	SkipClientPackets int `json:"skip_client_packets"` // Client packets to skip before logging
+	SkipServerPackets int `json:"skip_server_packets"` // Server packets to skip before logging
+	MaxPacketSize     int `json:"max_packet_size"`     // Skip packets larger than this (0 = no limit, default 1MB)
 }
 
 // backendEntry tracks a backend address with reference counting.
@@ -229,7 +234,8 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	}
 
 	serverConn, err := quic.DialAddr(dialCtx, backend, backendTLS, &quic.Config{
-		MaxIdleTimeout: 30 * time.Second,
+		MaxIdleTimeout:       30 * time.Second,
+		HandshakeIdleTimeout: 30 * time.Second,
 	})
 	if err != nil {
 		log.Printf("[terminator] dial backend %s failed: %v", backend, err)
@@ -246,7 +252,7 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	}
 
 	// Create session and start bridging
-	session := newTerminatorSession(clientConn, serverConn, h.config.LogPackets, h.config.SkipPackets)
+	session := newTerminatorSession(clientConn, serverConn, &h.config)
 	sessionID := h.sessionCount.Add(1)
 	h.sessions.Store(sessionID, session)
 	defer h.sessions.Delete(sessionID)
@@ -298,27 +304,34 @@ type terminatorSession struct {
 	wg            sync.WaitGroup
 	clientPackets atomic.Int32 // Counter for logged client packets
 	serverPackets atomic.Int32 // Counter for logged server packets
-	logPackets    int          // Max packets to log per direction
-	skipPackets   int          // Packets to skip before logging
+
+	// Per-direction logging config
+	logClientPackets  int
+	logServerPackets  int
+	skipClientPackets int
+	skipServerPackets int
+	maxPacketSize     int
 }
 
 // streamLogger buffers stream data to handle packet fragmentation.
 type streamLogger struct {
-	prefix      string
-	counter     *atomic.Int32
-	buffer      []byte
-	packets     int
-	maxPackets  int
-	skipPackets int
-	skipped     int
+	prefix        string
+	counter       *atomic.Int32
+	buffer        []byte
+	packets       int
+	maxPackets    int
+	skipPackets   int
+	skipped       int
+	maxPacketSize int // Skip packets larger than this
 }
 
-func newStreamLogger(prefix string, counter *atomic.Int32, maxPackets, skipPackets int) *streamLogger {
+func newStreamLogger(prefix string, counter *atomic.Int32, maxPackets, skipPackets, maxPacketSize int) *streamLogger {
 	return &streamLogger{
-		prefix:      prefix,
-		counter:     counter,
-		maxPackets:  maxPackets,
-		skipPackets: skipPackets,
+		prefix:        prefix,
+		counter:       counter,
+		maxPackets:    maxPackets,
+		skipPackets:   skipPackets,
+		maxPacketSize: maxPacketSize,
 	}
 }
 
@@ -329,14 +342,7 @@ func (l *streamLogger) processData(data []byte) {
 	}
 
 	l.buffer = append(l.buffer, data...)
-	beforeLen := len(l.buffer)
 	l.tryLogPackets()
-
-	// Debug: log if buffer is stuck
-	if len(l.buffer) > 1024 && len(l.buffer) == beforeLen && l.packets == 0 && l.skipped < l.skipPackets {
-		log.Printf("%s DEBUG: buffer stuck at %d bytes, skipped=%d, has zstd=%v",
-			l.prefix, len(l.buffer), l.skipped, bytes.Contains(l.buffer[:min(len(l.buffer), 256)], zstdMagic))
-	}
 }
 
 // tryLogPackets attempts to extract and log complete packets from the buffer.
@@ -362,7 +368,7 @@ func (l *streamLogger) tryLogPackets() {
 	}
 }
 
-const maxZstdDecodeSize = 64 * 1024 // 64KB max for zstd decode attempts
+const maxZstdDecodeSize = 2 * 1024 * 1024 // 2MB max for zstd decode attempts
 
 // tryConsumePacket finds a complete packet and optionally logs it.
 // Returns bytes consumed, or 0 if incomplete.
@@ -376,28 +382,37 @@ func (l *streamLogger) tryConsumePacket(shouldLog bool) int {
 	if idx >= 0 {
 		compressed := l.buffer[idx:]
 
-		// If buffer is too large, skip zstd decode and just consume a chunk
-		if len(l.buffer) > maxZstdDecodeSize {
-			// Large packet - log header + raw summary
-			consumeLen := 4096
+		// If buffer exceeds max packet size, silently skip in chunks
+		if l.maxPacketSize > 0 && len(l.buffer) > l.maxPacketSize {
+			consumeLen := 64 * 1024 // 64KB chunks
 			if consumeLen > len(l.buffer) {
 				consumeLen = len(l.buffer)
 			}
-			if shouldLog {
-				log.Printf("%s packet #%d (large zstd, %d bytes buffered, consuming %d)\n",
-					l.prefix, l.packets+1, len(l.buffer), consumeLen)
+			// Don't log, don't count - just silently consume
+			return consumeLen
+		}
+
+		// If buffer is too large for decode, skip in chunks
+		if len(l.buffer) > maxZstdDecodeSize {
+			consumeLen := 64 * 1024
+			if consumeLen > len(l.buffer) {
+				consumeLen = len(l.buffer)
 			}
 			return consumeLen
 		}
 
-		// Try to decode (only for reasonable sizes)
-		frameSize := getZstdFrameSize(compressed)
+		// Try to find complete zstd frame
+		frameSize := getZstdFrameSizeFast(compressed)
 		if frameSize == 0 {
 			return 0 // Need more data
 		}
 
-		// Complete frame
+		// Complete frame found - check size limit before logging
 		totalLen := idx + frameSize
+		if l.maxPacketSize > 0 && totalLen > l.maxPacketSize {
+			// Silently skip large packet
+			return totalLen
+		}
 		if shouldLog {
 			logPacketComplete(l.prefix, l.packets+1, l.buffer[:totalLen], idx, frameSize)
 		}
@@ -454,29 +469,55 @@ func (l *streamLogger) findPacketBoundary() int {
 	return 0
 }
 
-// getZstdFrameSize returns the total frame size, or 0 if incomplete.
-// Uses binary search to find the minimum valid frame size.
-func getZstdFrameSize(data []byte) int {
+// getZstdFrameSizeFast returns the total frame size, or 0 if incomplete.
+// Uses exponential search then binary search for efficiency on large data.
+func getZstdFrameSizeFast(data []byte) int {
 	if len(data) < 5 {
-		return 0 // Need magic + descriptor at minimum
+		return 0
 	}
 
-	// Binary search for minimum valid frame size
-	lo, hi := 5, len(data)
-	result := 0
+	// First, quick check if we have a complete frame at all
+	if _, err := zstdDecoder.DecodeAll(data, nil); err != nil {
+		return 0 // Frame incomplete
+	}
+
+	// Exponential search to find approximate size
+	size := 5
+	for size < len(data) {
+		if _, err := zstdDecoder.DecodeAll(data[:size], nil); err == nil {
+			break // Found a working size
+		}
+		if size < 1024 {
+			size += 64 // Small steps for small frames
+		} else if size < 64*1024 {
+			size += 1024 // 1KB steps for medium frames
+		} else {
+			size += 8192 // 8KB steps for large frames
+		}
+	}
+
+	if size > len(data) {
+		size = len(data)
+	}
+
+	// Binary search to find exact minimum size
+	lo, hi := 5, size
+	result := size
 
 	for lo <= hi {
 		mid := (lo + hi) / 2
 		if _, err := zstdDecoder.DecodeAll(data[:mid], nil); err == nil {
-			result = mid // This size works
-			hi = mid - 1 // Try smaller
+			result = mid
+			hi = mid - 1
 		} else {
-			lo = mid + 1 // Need more
+			lo = mid + 1
 		}
 	}
 
 	return result
 }
+
+const maxHexDumpSize = 4096 // Max bytes to hex dump
 
 // logPacketComplete logs a packet with successful zstd decode.
 func logPacketComplete(prefix string, num int, data []byte, zstdIdx, frameSize int) {
@@ -490,25 +531,45 @@ func logPacketComplete(prefix string, num int, data []byte, zstdIdx, frameSize i
 
 	compressed := data[zstdIdx : zstdIdx+frameSize]
 	if decompressed, err := zstdDecoder.DecodeAll(compressed, nil); err == nil {
-		sb.WriteString(fmt.Sprintf("── Payload (zstd: %d → %d bytes) ──\n", len(compressed), len(decompressed)))
-		sb.WriteString(hexDump(decompressed))
+		sb.WriteString(fmt.Sprintf("── Payload (zstd: %d → %d bytes, ratio %.1fx) ──\n",
+			len(compressed), len(decompressed), float64(len(decompressed))/float64(len(compressed))))
+
+		// Truncate very large payloads
+		if len(decompressed) > maxHexDumpSize {
+			sb.WriteString(hexDump(decompressed[:maxHexDumpSize]))
+			sb.WriteString(fmt.Sprintf("... (%d more bytes truncated)\n", len(decompressed)-maxHexDumpSize))
+		} else {
+			sb.WriteString(hexDump(decompressed))
+		}
 	} else {
 		sb.WriteString(fmt.Sprintf("── Payload (zstd decode failed: %v) ──\n", err))
-		sb.WriteString(hexDump(compressed))
+		if len(compressed) > maxHexDumpSize {
+			sb.WriteString(hexDump(compressed[:maxHexDumpSize]))
+			sb.WriteString(fmt.Sprintf("... (%d more bytes truncated)\n", len(compressed)-maxHexDumpSize))
+		} else {
+			sb.WriteString(hexDump(compressed))
+		}
 	}
 
 	log.Print(sb.String())
 }
 
-func newTerminatorSession(client, server *quic.Conn, logPackets, skipPackets int) *terminatorSession {
+func newTerminatorSession(client, server *quic.Conn, cfg *TerminatorConfig) *terminatorSession {
 	ctx, cancel := context.WithCancel(context.Background())
+	maxPktSize := cfg.MaxPacketSize
+	if maxPktSize == 0 {
+		maxPktSize = 1024 * 1024 // Default 1MB
+	}
 	return &terminatorSession{
-		clientConn:  client,
-		serverConn:  server,
-		ctx:         ctx,
-		cancel:      cancel,
-		logPackets:  logPackets,
-		skipPackets: skipPackets,
+		clientConn:        client,
+		serverConn:        server,
+		ctx:               ctx,
+		cancel:            cancel,
+		logClientPackets:  cfg.LogClientPackets,
+		logServerPackets:  cfg.LogServerPackets,
+		skipClientPackets: cfg.SkipClientPackets,
+		skipServerPackets: cfg.SkipServerPackets,
+		maxPacketSize:     maxPktSize,
 	}
 }
 
@@ -640,17 +701,25 @@ var zstdMagic = []byte{0x28, 0xB5, 0x2F, 0xFD}
 // Shared zstd decoder (thread-safe, reusable)
 var zstdDecoder, _ = zstd.NewReader(nil)
 
-// copyWithLog copies data from src to dst while logging the first 5 packets per direction.
+// copyWithLog copies data from src to dst while logging packets per direction.
 func (s *terminatorSession) copyWithLog(dst io.Writer, src io.Reader, prefix string) (int64, error) {
 	buf := make([]byte, 32*1024)
 	var total int64
 
-	counter := &s.serverPackets
+	var counter *atomic.Int32
+	var maxPackets, skipPackets int
+
 	if prefix == "[client]" {
 		counter = &s.clientPackets
+		maxPackets = s.logClientPackets
+		skipPackets = s.skipClientPackets
+	} else {
+		counter = &s.serverPackets
+		maxPackets = s.logServerPackets
+		skipPackets = s.skipServerPackets
 	}
 
-	logger := newStreamLogger(prefix, counter, s.logPackets, s.skipPackets)
+	logger := newStreamLogger(prefix, counter, maxPackets, skipPackets, s.maxPacketSize)
 
 	for {
 		n, err := src.Read(buf)
