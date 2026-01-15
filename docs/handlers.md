@@ -126,7 +126,7 @@ Useful for debugging or monitoring which hostnames clients connect to.
 
 ### terminator
 
-Terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Replaces the `forwarder` handler.
+Terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Must be placed before the `forwarder` handler.
 
 ::: warning
 Requires clients to use the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin to disable certificate binding validation.
@@ -178,11 +178,11 @@ Requires clients to use the [HytaleCustomCert](https://hybuildnet.github.io/Hyta
 | `backend_mtls` | Use certificate as client cert for backend mTLS |
 
 **Behavior:**
-- Terminates TLS from client using configured certificate
-- Selects certificate based on backend address (falls back to default)
-- Establishes new QUIC connection to backend
-- Bridges all streams bidirectionally
-- Returns `Handled`
+- Extracts DCID from initial packet and registers backend mapping
+- Redirects traffic to internal terminator listener
+- Terminates TLS using configured certificate (selected by backend address)
+- Bridges all streams bidirectionally to backend
+- Returns `Continue` (forwarder still required)
 
 See [hytale-terminating-proxy](https://github.com/HyBuildNet/hytale-terminating-proxy) for standalone library usage.
 

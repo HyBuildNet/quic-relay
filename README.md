@@ -118,7 +118,7 @@ Logs the SNI of each connection. Useful for debugging.
 
 ### terminator
 
-Terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Replaces the `forwarder` handler. Supports target-based certificates and mTLS.
+Terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Must be placed before the `forwarder` handler. Supports target-based certificates and mTLS.
 
 [!] Requires clients to use the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin to disable certificate binding validation.
 
@@ -147,7 +147,8 @@ Terminates QUIC TLS and bridges to backend servers. This allows inspection of ra
         "log_client_packets": 5,
         "log_server_packets": 5
       }
-    }
+    },
+    {"type": "forwarder"}
   ]
 }
 ```
