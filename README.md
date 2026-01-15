@@ -117,6 +117,44 @@ Logs the SNI of each connection. Useful for debugging.
 }
 ```
 
+### terminator
+
+Terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Replaces the `forwarder` handler. Supports target-based certificates and mTLS.
+
+[!] Requires clients to use the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin to disable certificate binding validation.
+
+```json
+{
+  "listen": ":5520",
+  "handlers": [
+    {"type": "sni-router", "config": {"routes": {"play.example.com": "10.0.0.1:25565"}}},
+    {
+      "type": "terminator",
+      "config": {
+        "listen": "auto",
+        "certs": {
+          "default": {
+            "cert": "/etc/quic-relay/server.crt",
+            "key": "/etc/quic-relay/server.key"
+          },
+          "targets": {
+            "10.0.0.1:25565": {
+              "cert": "/etc/quic-relay/backend1.crt",
+              "key": "/etc/quic-relay/backend1.key",
+              "backend_mtls": true
+            }
+          }
+        },
+        "log_client_packets": 5,
+        "log_server_packets": 5
+      }
+    }
+  ]
+}
+```
+
+See [pkg/terminator](https://github.com/HyBuildNet/hytale-terminating-proxy) for standalone library usage.
+
 ## Advanced
 
 ### Global config options
