@@ -63,24 +63,43 @@ get_latest_version() {
     echo "$version"
 }
 
+stop_service() {
+    if systemctl is-active --quiet quic-relay 2>/dev/null; then
+        log_info "Stopping quic-relay service..."
+        systemctl stop quic-relay
+    fi
+}
+
+start_service() {
+    if systemctl is-enabled --quiet quic-relay 2>/dev/null; then
+        log_info "Starting quic-relay service..."
+        systemctl start quic-relay
+    fi
+}
+
 download_binary() {
     local arch="$1"
     local version
     version=$(get_latest_version)
     local binary_name="quic-relay-linux-${arch}"
     local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
+    local tmp_file="/tmp/quic-relay-$$"
 
     log_info "Downloading quic-relay ${version} for ${arch}..."
 
     if command -v curl &> /dev/null; then
-        curl -fsSL -o "${INSTALL_DIR}/quic-relay" "$url"
+        curl -fsSL -o "$tmp_file" "$url"
     elif command -v wget &> /dev/null; then
-        wget -qO "${INSTALL_DIR}/quic-relay" "$url"
+        wget -qO "$tmp_file" "$url"
     else
         log_error "curl or wget is required"
         exit 1
     fi
 
+    # Stop service before replacing binary
+    stop_service
+
+    mv "$tmp_file" "${INSTALL_DIR}/quic-relay"
     chmod +x "${INSTALL_DIR}/quic-relay"
     log_info "Binary installed to ${INSTALL_DIR}/quic-relay"
 }
@@ -117,6 +136,11 @@ EOF
 }
 
 install_service() {
+    if [ -f "${SYSTEMD_DIR}/${SERVICE_FILE}" ]; then
+        log_info "Systemd service already exists, skipping"
+        return
+    fi
+
     local service_url="https://raw.githubusercontent.com/${REPO}/master/dist/${SERVICE_FILE}"
 
     log_info "Installing systemd service..."
@@ -132,14 +156,9 @@ install_service() {
 }
 
 enable_service() {
-    log_info "Enabling quic-relay service..."
-    systemctl enable quic-relay
-}
-
-restart_if_running() {
-    if systemctl is-active --quiet quic-relay; then
-        log_info "Restarting quic-relay service..."
-        systemctl restart quic-relay
+    if ! systemctl is-enabled --quiet quic-relay 2>/dev/null; then
+        log_info "Enabling quic-relay service..."
+        systemctl enable quic-relay
     fi
 }
 
@@ -161,7 +180,7 @@ main() {
     install_config
     install_service
     enable_service
-    restart_if_running
+    start_service
 
     echo ""
     log_info "Installation complete!"
