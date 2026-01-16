@@ -53,12 +53,24 @@ create_user() {
     fi
 }
 
+get_latest_version() {
+    local version
+    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+    if [ -z "$version" ]; then
+        log_error "Could not determine latest version"
+        exit 1
+    fi
+    echo "$version"
+}
+
 download_binary() {
     local arch="$1"
+    local version
+    version=$(get_latest_version)
     local binary_name="quic-relay-linux-${arch}"
-    local url="https://github.com/${REPO}/releases/latest/download/${binary_name}"
+    local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
 
-    log_info "Downloading quic-relay for ${arch}..."
+    log_info "Downloading quic-relay ${version} for ${arch}..."
 
     if command -v curl &> /dev/null; then
         curl -fsSL -o "${INSTALL_DIR}/quic-relay" "$url"
