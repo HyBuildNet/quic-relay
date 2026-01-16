@@ -8,6 +8,7 @@ Wants=network-online.target
 Type=simple
 User=quic-relay
 Group=quic-relay
+ExecStartPre=/usr/local/bin/quic-relay-check-update
 ExecStart=/usr/local/bin/quic-relay -config /etc/quic-relay/config.json
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

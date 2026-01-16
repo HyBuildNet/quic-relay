@@ -1,12 +1,15 @@
 .PHONY: build proxy echo client clean tidy
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
+
 # Build all binaries
 build:
 	@mkdir -p bin
-	go build -o bin/proxy ./cmd/proxy
+	go build $(LDFLAGS) -o bin/proxy ./cmd/proxy
 	go build -o bin/echo ./cmd/echo
 	go build -o bin/client ./cmd/client
-	@echo "Built: bin/proxy, bin/echo, bin/client"
+	@echo "Built: bin/proxy ($(VERSION)), bin/echo, bin/client"
 
 # Run individual components
 proxy:

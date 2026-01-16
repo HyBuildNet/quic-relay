@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,10 +14,19 @@ import (
 	"quic-relay/internal/proxy"
 )
 
+// Version is set via ldflags at build time
+var Version = "dev"
+
 func main() {
 	configFlag := flag.String("config", "", "Config file path or JSON string")
 	debugFlag := flag.Bool("d", false, "Enable debug logging")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
 
 	if *debugFlag {
 		debug.Enable()

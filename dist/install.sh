@@ -54,8 +54,9 @@ create_user() {
 }
 
 get_latest_version() {
-    local version
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+    local version response
+    response=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" 2>/dev/null)
+    version=$(echo "$response" | grep -m1 '"tag_name"' | cut -d'"' -f4)
     if [ -z "$version" ]; then
         log_error "Could not determine latest version"
         exit 1
@@ -115,8 +116,6 @@ install_config() {
 {
   "listen": ":5520",
   "handlers": [
-    {"type": "ratelimit-global", "config": {"max_parallel_connections": 10000}},
-    {"type": "logsni"},
     {
       "type": "sni-router",
       "config": {
@@ -126,13 +125,30 @@ install_config() {
         }
       }
     },
-    {"type": "forwarder"}
+    {
+      "type": "forwarder"
+    }
   ]
 }
 EOF
         chown quic-relay:quic-relay "${CONFIG_DIR}/config.json"
         chmod 640 "${CONFIG_DIR}/config.json"
     fi
+}
+
+install_check_script() {
+    local script_url="https://raw.githubusercontent.com/${REPO}/master/dist/check-update.sh"
+    local target="${INSTALL_DIR}/quic-relay-check-update"
+
+    log_info "Installing update check script..."
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL -o "$target" "$script_url"
+    elif command -v wget &> /dev/null; then
+        wget -qO "$target" "$script_url"
+    fi
+
+    chmod +x "$target"
 }
 
 install_service() {
@@ -177,6 +193,7 @@ main() {
 
     create_user
     download_binary "$arch"
+    install_check_script
     install_config
     install_service
     enable_service
@@ -187,7 +204,7 @@ main() {
     echo ""
     echo "  Next steps:"
     echo "    1. Edit config:  nano ${CONFIG_DIR}/config.json"
-    echo "    2. Start:        systemctl start quic-relay"
+    echo "    2. Restart:      systemctl restart quic-relay"
     echo "    3. Check status: systemctl status quic-relay"
     echo "    4. View logs:    journalctl -u quic-relay -f"
     echo ""
